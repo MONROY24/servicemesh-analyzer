@@ -31,42 +31,68 @@ impl Grafo {
             .push(destino.to_string());
     }
 
+    /// Devuelve true si existe al menos un ciclo en el grafo.
     pub fn tiene_ciclo(&self) -> bool {
-        let mut estado: HashMap<String, Estado> = HashMap::new();
+        !self.detectar_ciclos().is_empty()
+    }
 
-        for nodo in self.adyacencia.keys() {
-            estado.insert(nodo.clone(), Estado::NoVisitado);
-        }
+    /// Devuelve todos los ciclos encontrados, cada uno como lista de nodos.
+    /// Usa DFS con coloreo: blanco → gris → negro.
+    pub fn detectar_ciclos(&self) -> Vec<Vec<String>> {
+        let mut estado: HashMap<String, Estado> = self
+            .adyacencia
+            .keys()
+            .map(|k| (k.clone(), Estado::NoVisitado))
+            .collect();
+
+        let mut ciclos: Vec<Vec<String>> = Vec::new();
+        let mut pila: Vec<String> = Vec::new();
 
         for nodo in self.adyacencia.keys() {
             if estado[nodo] == Estado::NoVisitado {
-                if self.dfs_visitar(nodo, &mut estado) {
-                    return true;
-                }
+                self.dfs_ciclos(nodo, &mut estado, &mut pila, &mut ciclos);
             }
         }
-        false
+
+        ciclos
     }
 
-    fn dfs_visitar(&self, nodo: &str, estado: &mut HashMap<String, Estado>) -> bool {
+    fn dfs_ciclos(
+        &self,
+        nodo: &str,
+        estado: &mut HashMap<String, Estado>,
+        pila: &mut Vec<String>,
+        ciclos: &mut Vec<Vec<String>>,
+    ) {
         estado.insert(nodo.to_string(), Estado::EnProgreso);
+        pila.push(nodo.to_string());
 
         if let Some(vecinos) = self.adyacencia.get(nodo) {
             for vecino in vecinos {
                 match estado.get(vecino.as_str()) {
-                    Some(Estado::EnProgreso) => return true, // back-edge!
-                    Some(Estado::NoVisitado) => {
-                        if self.dfs_visitar(vecino, estado) {
-                            return true;
+                    Some(Estado::EnProgreso) => {
+                        // Encontramos un back-edge: reconstruir el ciclo desde la pila
+                        if let Some(inicio) = pila.iter().position(|n| n == vecino) {
+                            let ciclo: Vec<String> = pila[inicio..].to_vec();
+                            ciclos.push(ciclo);
                         }
+                    }
+                    Some(Estado::NoVisitado) => {
+                        self.dfs_ciclos(vecino, estado, pila, ciclos);
                     }
                     _ => {}
                 }
             }
         }
 
+        pila.pop();
         estado.insert(nodo.to_string(), Estado::Terminado);
-        false
+    }
+
+    /// Serializa la adyacencia del grafo como HashMap clonado,
+    /// útil para generar snapshot_grafo en formato JSON.
+    pub fn snapshot(&self) -> HashMap<String, Vec<String>> {
+        self.adyacencia.clone()
     }
 }
 
@@ -83,6 +109,7 @@ mod tests {
         grafo.agregar_dependencia("PaymentService", "AuthService");
 
         assert_eq!(grafo.tiene_ciclo(), true);
+        assert!(!grafo.detectar_ciclos().is_empty());
     }
 
     #[test]
@@ -108,6 +135,7 @@ mod tests {
         grafo.agregar_dependencia("PaymentService", "BillingService");
 
         assert_eq!(grafo.tiene_ciclo(), false);
+        assert!(grafo.detectar_ciclos().is_empty());
     }
 
     #[test]
