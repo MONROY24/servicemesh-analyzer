@@ -1,3 +1,4 @@
+mod db;
 mod state;
 mod routes;
 mod handlers;

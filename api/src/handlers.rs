@@ -5,11 +5,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::Row;
 use time::OffsetDateTime;
 
 use crate::state::AppState;
 use crate::error::AppError;
+use crate::db;
 
 // ─── Helpers de serialización de fechas ──────────────────────────────────────
 
@@ -109,42 +109,27 @@ pub async fn registrar_servicio(
         return Err(AppError::bad_request("El nombre del servicio no puede estar vacío."));
     }
 
-    let fila = sqlx::query(
-        "INSERT INTO servicios (nombre, descripcion)
-         VALUES ($1, $2)
-         ON CONFLICT (nombre) DO NOTHING
-         RETURNING id, nombre, descripcion, activo, creado_en, actualizado_en",
-    )
-    .bind(&nombre)
-    .bind(&payload.descripcion)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::conflict("Ya existe un servicio con ese nombre."))?;
-
-    let id: uuid::Uuid = fila.try_get("id")?;
-    let nombre_db: String = fila.try_get("nombre")?;
-    let descripcion: Option<String> = fila.try_get("descripcion")?;
-    let activo: bool = fila.try_get("activo")?;
-    let creado_en: OffsetDateTime = fila.try_get("creado_en")?;
-    let actualizado_en: OffsetDateTime = fila.try_get("actualizado_en")?;
+    let db_svc = db::insertar_servicio(&state.db, &nombre, &payload.descripcion)
+        .await?
+        .ok_or_else(|| AppError::conflict("Ya existe un servicio con ese nombre."))?;
 
     // Actualizar grafo en memoria
     {
-        let mut g = state.grafo.lock().unwrap();
-        g.agregar_servicio(&nombre_db);
+        let mut g = state.grafo.write().await;
+        g.agregar_servicio(&db_svc.nombre);
     }
 
-    tracing::info!("Servicio registrado: {}", nombre_db);
+    tracing::info!("Servicio registrado: {}", db_svc.nombre);
 
     Ok((
         StatusCode::CREATED,
         Json(ServicioDto {
-            id: id.to_string(),
-            nombre: nombre_db,
-            descripcion,
-            activo,
-            creado_en,
-            actualizado_en,
+            id: db_svc.id.to_string(),
+            nombre: db_svc.nombre,
+            descripcion: db_svc.descripcion,
+            activo: db_svc.activo,
+            creado_en: db_svc.creado_en,
+            actualizado_en: db_svc.actualizado_en,
         }),
     ))
 }
@@ -154,30 +139,21 @@ pub async fn registrar_servicio(
 pub async fn listar_servicios(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ServicioDto>>, AppError> {
-    let filas = sqlx::query(
-        "SELECT id, nombre, descripcion, activo, creado_en, actualizado_en
-         FROM servicios
-         WHERE activo = TRUE
-         ORDER BY nombre",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let db_servicios = db::listar_servicios_activos(&state.db).await?;
 
-    let servicios: Result<Vec<ServicioDto>, sqlx::Error> = filas
-        .iter()
-        .map(|f| {
-            Ok(ServicioDto {
-                id: f.try_get::<uuid::Uuid, _>("id")?.to_string(),
-                nombre: f.try_get("nombre")?,
-                descripcion: f.try_get("descripcion")?,
-                activo: f.try_get("activo")?,
-                creado_en: f.try_get("creado_en")?,
-                actualizado_en: f.try_get("actualizado_en")?,
-            })
+    let servicios: Vec<ServicioDto> = db_servicios
+        .into_iter()
+        .map(|f| ServicioDto {
+            id: f.id.to_string(),
+            nombre: f.nombre,
+            descripcion: f.descripcion,
+            activo: f.activo,
+            creado_en: f.creado_en,
+            actualizado_en: f.actualizado_en,
         })
         .collect();
 
-    Ok(Json(servicios?))
+    Ok(Json(servicios))
 }
 
 // ─── GET /services/raiz ───────────────────────────────────────────────────────
@@ -185,23 +161,17 @@ pub async fn listar_servicios(
 pub async fn servicios_raiz(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ServicioResumen>>, AppError> {
-    let filas = sqlx::query(
-        "SELECT nombre, descripcion FROM vista_servicios_raiz ORDER BY nombre",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let lista_db = db::listar_servicios_raiz(&state.db).await?;
 
-    let lista: Result<Vec<ServicioResumen>, sqlx::Error> = filas
-        .iter()
-        .map(|f| {
-            Ok(ServicioResumen {
-                nombre: f.try_get("nombre")?,
-                descripcion: f.try_get("descripcion")?,
-            })
+    let lista: Vec<ServicioResumen> = lista_db
+        .into_iter()
+        .map(|f| ServicioResumen {
+            nombre: f.nombre,
+            descripcion: f.descripcion,
         })
         .collect();
 
-    Ok(Json(lista?))
+    Ok(Json(lista))
 }
 
 // ─── GET /services/hoja ───────────────────────────────────────────────────────
@@ -209,23 +179,17 @@ pub async fn servicios_raiz(
 pub async fn servicios_hoja(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ServicioResumen>>, AppError> {
-    let filas = sqlx::query(
-        "SELECT nombre, descripcion FROM vista_servicios_hoja ORDER BY nombre",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let lista_db = db::listar_servicios_hoja(&state.db).await?;
 
-    let lista: Result<Vec<ServicioResumen>, sqlx::Error> = filas
-        .iter()
-        .map(|f| {
-            Ok(ServicioResumen {
-                nombre: f.try_get("nombre")?,
-                descripcion: f.try_get("descripcion")?,
-            })
+    let lista: Vec<ServicioResumen> = lista_db
+        .into_iter()
+        .map(|f| ServicioResumen {
+            nombre: f.nombre,
+            descripcion: f.descripcion,
         })
         .collect();
 
-    Ok(Json(lista?))
+    Ok(Json(lista))
 }
 
 // ─── POST /deps ───────────────────────────────────────────────────────────────
@@ -238,41 +202,38 @@ pub async fn registrar_dependencia(
         return Err(AppError::bad_request("Un servicio no puede depender de sí mismo (self-loop)."));
     }
 
-    let fila = sqlx::query(
-        "INSERT INTO dependencias (origen, destino, descripcion)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (origen, destino) DO NOTHING
-         RETURNING id, origen, destino, descripcion, creado_en",
-    )
-    .bind(payload.origen.trim())
-    .bind(payload.destino.trim())
-    .bind(&payload.descripcion)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::conflict("Ya existe esa dependencia."))?;
+    let mut tx = state.db.begin().await.map_err(|e| AppError::internal(e.to_string()))?;
 
-    let id: uuid::Uuid = fila.try_get("id")?;
-    let origen: String = fila.try_get("origen")?;
-    let destino: String = fila.try_get("destino")?;
-    let descripcion: Option<String> = fila.try_get("descripcion")?;
-    let creado_en: OffsetDateTime = fila.try_get("creado_en")?;
+    let origen = payload.origen.trim();
+    let destino = payload.destino.trim();
+
+    let db_dep = db::insertar_dependencia(&mut tx, origen, destino, &payload.descripcion)
+        .await?
+        .ok_or_else(|| AppError::conflict("Ya existe esa dependencia."))?;
 
     // Actualizar grafo en memoria
     {
-        let mut g = state.grafo.lock().unwrap();
-        g.agregar_dependencia(&origen, &destino);
+        let mut g = state.grafo.write().await;
+        g.agregar_dependencia(&db_dep.origen, &db_dep.destino);
     }
 
-    tracing::info!("Dependencia registrada: {} → {}", origen, destino);
+    if let Err(e) = tx.commit().await {
+        // Rollback del grafo si la query falla al confirmar la transacción
+        let mut g = state.grafo.write().await;
+        g.remover_dependencia(&db_dep.origen, &db_dep.destino);
+        return Err(AppError::internal(e.to_string()));
+    }
+
+    tracing::info!("Dependencia registrada: {} → {}", db_dep.origen, db_dep.destino);
 
     Ok((
         StatusCode::CREATED,
         Json(DependenciaDto {
-            id: id.to_string(),
-            origen,
-            destino,
-            descripcion,
-            creado_en,
+            id: db_dep.id.to_string(),
+            origen: db_dep.origen,
+            destino: db_dep.destino,
+            descripcion: db_dep.descripcion,
+            creado_en: db_dep.creado_en,
         }),
     ))
 }
@@ -282,29 +243,22 @@ pub async fn registrar_dependencia(
 pub async fn listar_dependencias(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<FilaVistaGrafo>>, AppError> {
-    let filas = sqlx::query(
-        "SELECT dep_id, origen, desc_origen, destino, desc_destino, desc_dependencia, creado_en
-         FROM vista_grafo",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let db_filas = db::listar_dependencias_vista(&state.db).await?;
 
-    let lista: Result<Vec<FilaVistaGrafo>, sqlx::Error> = filas
-        .iter()
-        .map(|f| {
-            Ok(FilaVistaGrafo {
-                dep_id: f.try_get::<uuid::Uuid, _>("dep_id")?.to_string(),
-                origen: f.try_get("origen")?,
-                desc_origen: f.try_get("desc_origen")?,
-                destino: f.try_get("destino")?,
-                desc_destino: f.try_get("desc_destino")?,
-                desc_dependencia: f.try_get("desc_dependencia")?,
-                creado_en: f.try_get("creado_en")?,
-            })
+    let lista: Vec<FilaVistaGrafo> = db_filas
+        .into_iter()
+        .map(|f| FilaVistaGrafo {
+            dep_id: f.dep_id.to_string(),
+            origen: f.origen,
+            desc_origen: f.desc_origen,
+            destino: f.destino,
+            desc_destino: f.desc_destino,
+            desc_dependencia: f.desc_dependencia,
+            creado_en: f.creado_en,
         })
         .collect();
 
-    Ok(Json(lista?))
+    Ok(Json(lista))
 }
 
 // ─── GET /analyze ─────────────────────────────────────────────────────────────
@@ -313,7 +267,7 @@ pub async fn analizar_grafo(
     State(state): State<AppState>,
 ) -> Result<Json<AnalisisDto>, AppError> {
     let (tiene_ciclo, ciclos, snap) = {
-        let g = state.grafo.lock().unwrap();
+        let g = state.grafo.read().await;
         let ciclos = g.detectar_ciclos();
         let tiene_ciclo = !ciclos.is_empty();
         let snap = g.snapshot();
@@ -323,20 +277,12 @@ pub async fn analizar_grafo(
     let snapshot_json = json!(snap);
     let ciclos_json = json!(ciclos);
 
-    // Persistir en tabla analisis
-    let fila = sqlx::query(
-        "INSERT INTO analisis (tiene_ciclo, snapshot_grafo, ciclos_detectados)
-         VALUES ($1, $2, $3)
-         RETURNING id, ejecutado_en",
-    )
-    .bind(tiene_ciclo)
-    .bind(&snapshot_json)
-    .bind(&ciclos_json)
-    .fetch_one(&state.db)
-    .await?;
-
-    let id: uuid::Uuid = fila.try_get("id")?;
-    let ejecutado_en: OffsetDateTime = fila.try_get("ejecutado_en")?;
+    let (id, ejecutado_en) = db::insertar_analisis(
+        &state.db,
+        tiene_ciclo,
+        &snapshot_json,
+        &ciclos_json,
+    ).await?;
 
     let alerta = if tiene_ciclo {
         format!(
@@ -364,27 +310,18 @@ pub async fn analizar_grafo(
 pub async fn historial_analisis(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AnalisisResumen>>, AppError> {
-    let filas = sqlx::query(
-        "SELECT id, tiene_ciclo, ejecutado_en
-         FROM analisis
-         ORDER BY ejecutado_en DESC
-         LIMIT 50",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let db_filas = db::listar_historial_analisis(&state.db).await?;
 
-    let lista: Result<Vec<AnalisisResumen>, sqlx::Error> = filas
-        .iter()
-        .map(|f| {
-            Ok(AnalisisResumen {
-                id: f.try_get::<uuid::Uuid, _>("id")?.to_string(),
-                tiene_ciclo: f.try_get("tiene_ciclo")?,
-                ejecutado_en: f.try_get("ejecutado_en")?,
-            })
+    let lista: Vec<AnalisisResumen> = db_filas
+        .into_iter()
+        .map(|f| AnalisisResumen {
+            id: f.id.to_string(),
+            tiene_ciclo: f.tiene_ciclo,
+            ejecutado_en: f.ejecutado_en,
         })
         .collect();
 
-    Ok(Json(lista?))
+    Ok(Json(lista))
 }
 
 // ─── GET /analyze/ultimo ──────────────────────────────────────────────────────
@@ -392,34 +329,22 @@ pub async fn historial_analisis(
 pub async fn ultimo_analisis(
     State(state): State<AppState>,
 ) -> Result<Json<AnalisisDto>, AppError> {
-    let fila = sqlx::query(
-        "SELECT id, tiene_ciclo, snapshot_grafo, ciclos_detectados, ejecutado_en
-         FROM analisis
-         ORDER BY ejecutado_en DESC
-         LIMIT 1",
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::not_found("Todavía no se ha ejecutado ningún análisis."))?;
+    let f = db::obtener_ultimo_analisis(&state.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Todavía no se ha ejecutado ningún análisis."))?;
 
-    let id: uuid::Uuid = fila.try_get("id")?;
-    let tiene_ciclo: bool = fila.try_get("tiene_ciclo")?;
-    let snapshot_grafo: Value = fila.try_get("snapshot_grafo")?;
-    let ciclos_detectados: Value = fila.try_get("ciclos_detectados")?;
-    let ejecutado_en: OffsetDateTime = fila.try_get("ejecutado_en")?;
-
-    let alerta = if tiene_ciclo {
+    let alerta = if f.tiene_ciclo {
         "⚠ ALERTA CRÍTICA: Se detectaron dependencias circulares.".to_string()
     } else {
         "✓ OK: No se detectaron dependencias circulares.".to_string()
     };
 
     Ok(Json(AnalisisDto {
-        id: id.to_string(),
-        tiene_ciclo,
-        snapshot_grafo,
-        ciclos_detectados,
-        ejecutado_en,
+        id: f.id.to_string(),
+        tiene_ciclo: f.tiene_ciclo,
+        snapshot_grafo: f.snapshot_grafo,
+        ciclos_detectados: f.ciclos_detectados,
+        ejecutado_en: f.ejecutado_en,
         alerta,
     }))
 }

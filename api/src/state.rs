@@ -1,14 +1,15 @@
-use sqlx::{PgPool, Row};
-use std::sync::{Arc, Mutex};
+use sqlx::PgPool;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use mesh_core::dfs::Grafo;
 
 /// Estado compartido de la aplicación.
 /// Contiene el pool de conexiones a PostgreSQL
-/// y el grafo en memoria protegido por un Mutex.
+/// y el grafo en memoria protegido por un RwLock.
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-    pub grafo: Arc<Mutex<Grafo>>,
+    pub grafo: Arc<RwLock<Grafo>>,
 }
 
 impl AppState {
@@ -16,32 +17,25 @@ impl AppState {
     /// Carga la topología de servicios activos y dependencias
     /// desde PostgreSQL hacia el grafo en memoria.
     pub async fn new(db: PgPool) -> Result<Self, sqlx::Error> {
-        let grafo = Arc::new(Mutex::new(Grafo::nuevo()));
+        let grafo = Arc::new(RwLock::new(Grafo::nuevo()));
 
         // Cargar solo servicios activos desde la BD
-        let servicios = sqlx::query("SELECT nombre FROM servicios WHERE activo = TRUE")
-            .fetch_all(&db)
-            .await?;
+        let servicios = crate::db::cargar_nombres_servicios_activos(&db).await?;
 
         {
-            let mut g = grafo.lock().unwrap();
-            for s in &servicios {
-                let nombre: String = s.try_get("nombre")?;
-                g.agregar_servicio(&nombre);
+            let mut g = grafo.write().await;
+            for nombre in &servicios {
+                g.agregar_servicio(nombre);
             }
         }
 
         // Cargar dependencias existentes desde la BD
-        let dependencias = sqlx::query("SELECT origen, destino FROM dependencias")
-            .fetch_all(&db)
-            .await?;
+        let dependencias = crate::db::cargar_pares_dependencias(&db).await?;
 
         {
-            let mut g = grafo.lock().unwrap();
-            for d in &dependencias {
-                let origen: String = d.try_get("origen")?;
-                let destino: String = d.try_get("destino")?;
-                g.agregar_dependencia(&origen, &destino);
+            let mut g = grafo.write().await;
+            for (origen, destino) in &dependencias {
+                g.agregar_dependencia(origen, destino);
             }
         }
 

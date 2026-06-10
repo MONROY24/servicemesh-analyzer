@@ -1,3 +1,6 @@
 /target/
 **/*.rs.bk
 .env
+servicemesh-analyzer/target/
+servicemesh-analyzer/api/target/
+servicemesh-analyzer/core/target/

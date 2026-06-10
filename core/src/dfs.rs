@@ -53,6 +53,14 @@ impl Grafo {
         }
     }
 
+    /// Elimina una dependencia del grafo, si existe.
+    /// Esto es útil para hacer rollback si una transacción en BD falla después de actualizar el grafo.
+    pub fn remover_dependencia(&mut self, origen: &str, destino: &str) {
+        if let Some(dependencias) = self.adyacencia.get_mut(origen) {
+            dependencias.retain(|d| d != destino);
+        }
+    }
+
     /// Indica si el grafo contiene al menos un ciclo.
     ///
     /// Esta función se utiliza como una verificación rápida para determinar
