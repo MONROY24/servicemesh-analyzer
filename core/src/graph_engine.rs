@@ -24,6 +24,22 @@ use petgraph::graph::{DiGraph, NodeIndex};
 ///
 /// Con `NodeIndex` (un simple entero), el grafo es el único dueño de todos los nodos,
 /// y los índices son sólo números que no transfieren ni comparten ownership.
+///
+/// # Ejemplo
+///
+/// ```
+/// use core::graph_engine::GraphEngine;
+///
+/// // Crear un motor de grafo vacío
+/// let mut motor = GraphEngine::new();
+///
+/// // Agregar dos servicios con dependencia circular entre ellos
+/// motor.agregar_dependencia("servicio-a", "servicio-b");
+/// motor.agregar_dependencia("servicio-b", "servicio-a");
+///
+/// // El motor debe detectar el ciclo
+/// assert!(motor.tiene_ciclo());
+/// ```
 pub struct GraphEngine {
     /// Grafo dirigido donde cada nodo es el nombre de un servicio
     /// y cada arista representa una dependencia entre servicios
