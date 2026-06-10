@@ -5,7 +5,11 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$DIR")"
 
-ENV_FILE="$ROOT_DIR/.env.example"
+if [ -f "$ROOT_DIR/.env" ]; then
+    ENV_FILE="$ROOT_DIR/.env"
+else
+    ENV_FILE="$ROOT_DIR/.env.example"
+fi
 
 # Se intenta extraer la URL y limpiarla de retornos de carro
 DB_URL=$(grep -i "DATABASE_URL=" "$ENV_FILE" 2>/dev/null | tr -d '\r\n\0' | cut -d '=' -f 2-)
