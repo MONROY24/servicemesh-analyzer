@@ -117,6 +117,8 @@ pub async fn registrar_servicio(
     {
         let mut g = state.grafo.write().await;
         g.agregar_servicio(&db_svc.nombre);
+        let mut m = state.motor.write().await;
+        m.agregar_servicio(&db_svc.nombre);
     }
 
     tracing::info!("Servicio registrado: {}", db_svc.nombre);
@@ -215,6 +217,8 @@ pub async fn registrar_dependencia(
     {
         let mut g = state.grafo.write().await;
         g.agregar_dependencia(&db_dep.origen, &db_dep.destino);
+        let mut m = state.motor.write().await;
+        m.agregar_dependencia(&db_dep.origen, &db_dep.destino);
     }
 
     if let Err(e) = tx.commit().await {
@@ -268,9 +272,10 @@ pub async fn analizar_grafo(
 ) -> Result<Json<AnalisisDto>, AppError> {
     let (tiene_ciclo, ciclos, snap) = {
         let g = state.grafo.read().await;
+        let m = state.motor.read().await;
         let ciclos = g.detectar_ciclos();
-        let tiene_ciclo = !ciclos.is_empty();
-        let snap = g.snapshot();
+        let tiene_ciclo = m.tiene_ciclo();
+        let snap = m.instantanea();
         (tiene_ciclo, ciclos, snap)
     };
 
