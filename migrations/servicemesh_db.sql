@@ -47,7 +47,9 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE TRIGGER trg_servicios_actualizado_en
+DROP TRIGGER IF EXISTS trg_servicios_actualizado_en ON servicios;
+
+CREATE TRIGGER trg_servicios_actualizado_en
     BEFORE UPDATE ON servicios
     FOR EACH ROW EXECUTE FUNCTION fn_actualizar_timestamp();
 
