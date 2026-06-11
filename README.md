@@ -38,6 +38,22 @@ Cuando se llama a `GET /analyze`, el sistema ejecuta DFS sobre el grafo en memor
 
 ---
 
+## Análisis Teórico de Complejidad
+
+En cumplimiento de los requerimientos de diseño algorítmico, el motor de grafos toma decisiones clave para garantizar la máxima eficiencia en la estructura subyacente:
+
+### 1. Detección de Ciclos: O(V + E) vs O(V²)
+Para detectar dependencias circulares, implementamos un recorrido en profundidad (DFS) con **coloreo de nodos**. Al representar la topología de servicios mediante una **Lista de Adyacencia** (donde cada nodo apunta solo a sus dependientes directos), el DFS visita cada vértice (V) y cada arista (E) a lo sumo una vez, logrando un tiempo asintótico óptimo de **O(V + E)**.
+
+Si el grafo se implementara de forma ingenua como una **Matriz de Adyacencia** (una cuadrícula $V \times V$), el DFS se vería obligado a verificar cada destino posible iterativamente aunque no existieran aristas, degradando el rendimiento a un estricto e inevitable **O(V²)**. Dado que las arquitecturas de microservicios configuran grafos fuertemente dispersos (*sparse graphs*, donde $E \ll V²$), la lista de adyacencia en $O(V + E)$ ofrece un desempeño infinitamente superior.
+
+### 2. Arena Allocation vs HashMap (Localidad de Caché)
+A diferencia de los enfoques básicos que gestionan grafos usando múltiples diccionarios (`HashMap`) anidados, nuestro motor interno gestiona los identificadores mediante `NodeIndex` encapsulando vectores lineales (`Vec`), usando un patrón conocido como **Arena Allocation**.
+
+El problema de un `HashMap` es que fragmenta dinámicamente sus elementos en el *heap*, ocasionando altos costos en accesos secuenciales. Por el contrario, el orden contiguo en memoria del patrón arena asegura una inmejorable **localidad de caché (Cache Locality)**. Durante el recorrido intensivo de grafos gigantes, al cargar un nodo en las líneas de caché L1/L2 del procesador, los nodos vecinos son cargados colateralmente, mitigando drásticamente los costosos retrasos por *cache misses* (fallos de caché) a nivel hardware.
+
+---
+
 ## Arquitectura
 
 El proyecto usa un **Cargo Workspace** dividido en dos crates independientes:

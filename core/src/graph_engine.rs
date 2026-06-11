@@ -25,6 +25,16 @@ use petgraph::graph::{DiGraph, NodeIndex};
 /// Con `NodeIndex` (un simple entero), el grafo es el único dueño de todos los nodos,
 /// y los índices son sólo números que no transfieren ni comparten ownership.
 ///
+/// ## Arena Allocation vs HashMap y Localidad de Caché
+///
+/// Mientras que un `HashMap` dispersa sus elementos en el heap sin un orden contiguo
+/// predecible, `petgraph` almacena todos los nodos y aristas secuencialmente utilizando vectores
+/// (`Vec` como Arena Allocation). Esto provee una **excelente localidad de caché** (Cache Locality).
+/// Durante los recorridos intensivos como el DFS, al cargar un nodo en las líneas de caché
+/// de la CPU (L1/L2), los nodos adyacentes en memoria viajan con él. Esto reduce drásticamente
+/// los costosos "cache misses", garantizando que el análisis de grafos grandes escale de forma
+/// muchísimo más eficiente que si dependiéramos exclusivamente de múltiples diccionarios fragmentados.
+///
 /// # Ejemplo
 ///
 /// ```
@@ -46,6 +56,12 @@ pub struct GraphEngine {
     pub grafo: DiGraph<String, ()>,
     /// Mapa de nombre de servicio a su índice de nodo en el grafo
     pub indices: HashMap<String, NodeIndex>,
+}
+
+impl Default for GraphEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GraphEngine {
@@ -75,10 +91,14 @@ impl GraphEngine {
     /// Remueve un servicio del grafo por completo, eliminando nodos y aristas incidentes.
     pub fn remover_servicio(&mut self, nombre: &str) {
         if let Some(indice) = self.indices.remove(nombre) {
+            // Verificamos si el nodo a remover es el último antes de mutar el grafo.
+            let es_ultimo = indice.index() == self.grafo.node_count() - 1;
+            
             self.grafo.remove_node(indice);
+            
             // Al remover un nodo, petgraph intercambia el nodo removido con el último nodo del grafo.
-            // Necesitamos actualizar el índice del nodo que fue movido.
-            if indice.index() < self.grafo.node_count() {
+            // Si el nodo removido no era el último, el último nodo fue movido a su lugar y necesitamos actualizar su índice.
+            if !es_ultimo {
                 let nombre_movido = self.grafo[indice].clone();
                 self.indices.insert(nombre_movido, indice);
             }
@@ -177,5 +197,16 @@ mod pruebas {
         motor.agregar_dependencia("servicio-a", "servicio-b");
         motor.agregar_dependencia("servicio-b", "servicio-c"); // cadena simple sin ciclo
         assert!(!motor.tiene_ciclo());
+    }
+
+    #[test]
+    fn test_remove_last_node() {
+        let mut motor = GraphEngine::new();
+        motor.agregar_servicio("A");
+        motor.agregar_servicio("B");
+        motor.remover_servicio("B");
+        assert_eq!(motor.indices.get("A").unwrap().index(), 0);
+        assert!(motor.indices.get("B").is_none());
+        assert_eq!(motor.conteo_nodos(), 1);
     }
 }

@@ -82,8 +82,13 @@ impl GrafoConIndices {
         indice
     }
 
-    pub fn agregar_dependencia(&mut self, origen: usize, destino: usize) {
+    pub fn agregar_dependencia(&mut self, origen: usize, destino: usize) -> Result<(), String> {
+        let len = self.servicios.len();
+        if origen >= len || destino >= len {
+            return Err(format!("Índice fuera de rango: origen={}, destino={}, max={}", origen, destino, len.saturating_sub(1)));
+        }
         self.dependencias.push((origen, destino));
+        Ok(())
     }
 
     pub fn imprimir_topologia(&self) -> Vec<String> {
@@ -111,8 +116,8 @@ mod tests {
         let servicio_a = grafo.agregar_servicio("Servicio A");
         let servicio_b = grafo.agregar_servicio("Servicio B");
 
-        grafo.agregar_dependencia(servicio_a, servicio_b);
-        grafo.agregar_dependencia(servicio_b, servicio_a);
+        grafo.agregar_dependencia(servicio_a, servicio_b).unwrap();
+        grafo.agregar_dependencia(servicio_b, servicio_a).unwrap();
 
         let topologia = grafo.imprimir_topologia();
 

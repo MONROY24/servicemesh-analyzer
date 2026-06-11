@@ -74,10 +74,60 @@ impl Grafo {
     /// Esta función se utiliza como una verificación rápida para determinar
     /// si existe una dependencia circular entre microservicios.
     pub fn tiene_ciclo(&self) -> bool {
-        !self.detectar_ciclos().is_empty()
+        let mut estado = self.inicializar_estados();
+
+        for servicio in self.adyacencia.keys() {
+            if estado.get(servicio) == Some(&Estado::NoVisitado) {
+                if self.dfs_tiene_ciclo(servicio, &mut estado) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn dfs_tiene_ciclo(
+        &self,
+        servicio_actual: &str,
+        estado: &mut HashMap<String, Estado>,
+    ) -> bool {
+        estado.insert(servicio_actual.to_string(), Estado::EnProgreso);
+
+        if let Some(dependencias) = self.adyacencia.get(servicio_actual) {
+            for servicio_dependiente in dependencias {
+                match estado.get(servicio_dependiente.as_str()) {
+                    Some(Estado::NoVisitado) => {
+                        if self.dfs_tiene_ciclo(servicio_dependiente, estado) {
+                            return true;
+                        }
+                    }
+                    Some(Estado::EnProgreso) => {
+                        return true; // Encontramos un back-edge
+                    }
+                    Some(Estado::Terminado) | None => {}
+                }
+            }
+        }
+
+        estado.insert(servicio_actual.to_string(), Estado::Terminado);
+        false
     }
 
     /// Detecta todos los ciclos encontrados en el grafo mediante DFS.
+    ///
+    /// # Análisis Teórico de Complejidad (O(V²) vs O(V+E))
+    ///
+    /// En este motor de grafo se utiliza una Lista de Adyacencia (`HashMap<String, Vec<String>>`)
+    /// y una estrategia de coloreo con DFS (Depth-First Search). Esto nos permite explorar cada vértice (V)
+    /// y cada arista (E) a lo sumo una vez. En consecuencia, la detección de ciclos tiene
+    /// una complejidad temporal óptima de **O(V + E)**.
+    ///
+    /// Si la representación del grafo fuera una matriz de adyacencia (una cuadrícula V×V),
+    /// el recorrido DFS tendría que iterar sobre los `V` posibles destinos por cada nodo visitado,
+    /// existan o no dependencias. Esto degradaría el rendimiento forzando un escenario de **O(V²)**.
+    /// Para arquitecturas de microservicios, que típicamente conforman grafos muy dispersos (E << V²),
+    /// la lista de adyacencia con O(V + E) ofrece un desempeño muy superior y es la técnica recomendada.
     ///
     /// El algoritmo utiliza una estrategia de coloreo:
     ///
@@ -144,7 +194,10 @@ impl Grafo {
                         if let Some(ciclo) =
                             Self::reconstruir_ciclo(pila_recursion, servicio_dependiente)
                         {
-                            ciclos_detectados.push(ciclo);
+                            let ciclo_normalizado = Self::normalizar_ciclo(ciclo);
+                            if !ciclos_detectados.contains(&ciclo_normalizado) {
+                                ciclos_detectados.push(ciclo_normalizado);
+                            }
                         }
                     }
 
@@ -177,12 +230,28 @@ impl Grafo {
         Some(ciclo)
     }
 
+    /// Normaliza un ciclo rotándolo para que comience con el nodo lexicográficamente menor.
+    /// Esto asegura que ciclos como A->B->A y B->A->B sean idénticos (A->B->A).
+    fn normalizar_ciclo(ciclo: Vec<String>) -> Vec<String> {
+        if ciclo.len() <= 1 {
+            return ciclo;
+        }
+        
+        let mut nodos = ciclo[..ciclo.len() - 1].to_vec();
+        if let Some(min_idx) = nodos.iter().enumerate().min_by_key(|&(_, val)| val).map(|(i, _)| i) {
+            nodos.rotate_left(min_idx);
+        }
+        
+        nodos.push(nodos[0].clone());
+        nodos
+    }
+
     /// Genera una copia del grafo en formato HashMap.
     ///
     /// Esta función es útil para serializar el estado actual del grafo
     /// como snapshot dentro del análisis del sistema.
-    pub fn snapshot(&self) -> HashMap<String, Vec<String>> {
-        self.adyacencia.clone()
+    pub fn snapshot(&self) -> &HashMap<String, Vec<String>> {
+        &self.adyacencia
     }
 }
 
