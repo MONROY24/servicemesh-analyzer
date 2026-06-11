@@ -113,10 +113,10 @@ pub async fn registrar_servicio(
         .await?
         .ok_or_else(|| AppError::conflict("Ya existe un servicio con ese nombre."))?;
 
-    // Actualizar grafo en memoria
+    // Actualizar motor en memoria
     {
-        let mut g = state.grafo.write().await;
-        g.agregar_servicio(&db_svc.nombre);
+        let mut m = state.motor.write().await;
+        m.agregar_servicio(&db_svc.nombre);
     }
 
     tracing::info!("Servicio registrado: {}", db_svc.nombre);
@@ -132,6 +132,32 @@ pub async fn registrar_servicio(
             actualizado_en: db_svc.actualizado_en,
         }),
     ))
+}
+
+// ─── DELETE /services/:nombre ─────────────────────────────────────────────────
+pub async fn desactivar_servicio(
+    State(state): State<AppState>,
+    axum::extract::Path(nombre): axum::extract::Path<String>,
+) -> Result<StatusCode, AppError> {
+    let nombre = nombre.trim();
+    if nombre.is_empty() {
+        return Err(AppError::bad_request("El nombre del servicio no puede estar vacío."));
+    }
+
+    let desactivado = db::desactivar_servicio(&state.db, nombre).await?;
+    if !desactivado {
+        return Err(AppError::not_found("Servicio no encontrado o ya estaba desactivado."));
+    }
+
+    // Actualizar motor en memoria
+    {
+        let mut m = state.motor.write().await;
+        m.remover_servicio(nombre);
+    }
+
+    tracing::info!("Servicio desactivado: {}", nombre);
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── GET /services ────────────────────────────────────────────────────────────
@@ -211,16 +237,16 @@ pub async fn registrar_dependencia(
         .await?
         .ok_or_else(|| AppError::conflict("Ya existe esa dependencia."))?;
 
-    // Actualizar grafo en memoria
+    // Actualizar motor en memoria
     {
-        let mut g = state.grafo.write().await;
-        g.agregar_dependencia(&db_dep.origen, &db_dep.destino);
+        let mut m = state.motor.write().await;
+        m.agregar_dependencia(&db_dep.origen, &db_dep.destino);
     }
 
     if let Err(e) = tx.commit().await {
-        // Rollback del grafo si la query falla al confirmar la transacción
-        let mut g = state.grafo.write().await;
-        g.remover_dependencia(&db_dep.origen, &db_dep.destino);
+        // Rollback del motor si la query falla al confirmar la transacción
+        let mut m = state.motor.write().await;
+        m.remover_dependencia(&db_dep.origen, &db_dep.destino);
         return Err(AppError::internal(e.to_string()));
     }
 
@@ -236,6 +262,34 @@ pub async fn registrar_dependencia(
             creado_en: db_dep.creado_en,
         }),
     ))
+}
+
+// ─── DELETE /deps/:origen/:destino ────────────────────────────────────────────
+pub async fn eliminar_dependencia(
+    State(state): State<AppState>,
+    axum::extract::Path((origen, destino)): axum::extract::Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let origen = origen.trim();
+    let destino = destino.trim();
+
+    if origen.is_empty() || destino.is_empty() {
+        return Err(AppError::bad_request("El origen y destino no pueden estar vacíos."));
+    }
+
+    let eliminado = db::eliminar_dependencia(&state.db, origen, destino).await?;
+    if !eliminado {
+        return Err(AppError::not_found("Dependencia no encontrada."));
+    }
+
+    // Actualizar motor en memoria
+    {
+        let mut m = state.motor.write().await;
+        m.remover_dependencia(origen, destino);
+    }
+
+    tracing::info!("Dependencia eliminada: {} → {}", origen, destino);
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── GET /deps ────────────────────────────────────────────────────────────────
@@ -267,10 +321,14 @@ pub async fn analizar_grafo(
     State(state): State<AppState>,
 ) -> Result<Json<AnalisisDto>, AppError> {
     let (tiene_ciclo, ciclos, snap) = {
-        let g = state.grafo.read().await;
-        let ciclos = g.detectar_ciclos();
-        let tiene_ciclo = !ciclos.is_empty();
-        let snap = g.snapshot();
+        let m = state.motor.read().await;
+        let tiene_ciclo = m.tiene_ciclo();
+        let snap = m.instantanea();
+        // Para consistencia perfecta, extraemos los ciclos concretos
+        // usando el DFS pero basándonos 100% en el estado actual de petgraph.
+        let mut g_temp = mesh_core::dfs::Grafo::nuevo();
+        g_temp.adyacencia = snap.clone();
+        let ciclos = g_temp.detectar_ciclos();
         (tiene_ciclo, ciclos, snap)
     };
 

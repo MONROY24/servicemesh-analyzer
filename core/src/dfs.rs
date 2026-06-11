@@ -36,6 +36,14 @@ impl Grafo {
         self.adyacencia.entry(nombre.to_string()).or_default();
     }
 
+    /// Remueve un servicio del grafo y cualquier dependencia hacia él.
+    pub fn remover_servicio(&mut self, nombre: &str) {
+        self.adyacencia.remove(nombre);
+        for dependencias in self.adyacencia.values_mut() {
+            dependencias.retain(|d| d != nombre);
+        }
+    }
+
     /// Agrega una dependencia dirigida entre dos servicios.
     ///
     /// La relación representa:
