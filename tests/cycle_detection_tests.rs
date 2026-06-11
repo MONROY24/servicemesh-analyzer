@@ -3,6 +3,10 @@ use serde_json::json;
 use std::process::{Command, Child};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
+use std::sync::Mutex;
+
+// Mutex global para serializar los tests de integración y evitar colisiones de puerto 3000 y base de datos
+static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 struct ServerGuard {
     child: Child,
@@ -40,8 +44,15 @@ async fn start_server() -> ServerGuard {
     ServerGuard { child }
 }
 
+async fn cleanup_services(client: &Client, base_url: &str, services: &[&str]) {
+    for srv in services {
+        let _ = client.delete(&format!("{}/services/{}", base_url, srv)).send().await;
+    }
+}
+
 #[tokio::test]
 async fn prueba_flujo_completo_con_ciclo() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _guard = start_server().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
@@ -78,10 +89,13 @@ async fn prueba_flujo_completo_con_ciclo() {
     let body: serde_json::Value = resp_analisis.json().await.unwrap();
     assert_eq!(body["tiene_ciclo"], true, "El GraphEngine debería haber detectado el ciclo");
     assert!(body["alerta"].as_str().unwrap().contains("ALERTA CRÍTICA"), "El mensaje de alerta no indica ciclo");
+
+    cleanup_services(&client, base_url, &[&srv_a, &srv_b, &srv_c]).await;
 }
 
 #[tokio::test]
 async fn prueba_grafo_sin_ciclos() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _guard = start_server().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
@@ -132,10 +146,13 @@ async fn prueba_grafo_sin_ciclos() {
         !servicios_en_ciclo.contains(&srv_c),
         "Los servicios de prueba no deberían estar en ningún ciclo"
     );
+
+    cleanup_services(&client, base_url, &[&srv_a, &srv_b, &srv_c]).await;
 }
 
 #[tokio::test]
 async fn prueba_servicio_duplicado_es_rechazado() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _guard = start_server().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
@@ -155,10 +172,13 @@ async fn prueba_servicio_duplicado_es_rechazado() {
         resp2.status() == 409 || resp2.status() == 400,
         "El servicio duplicado debería ser rechazado con 409 o 400"
     );
+
+    cleanup_services(&client, base_url, &[&srv]).await;
 }
 
 #[tokio::test]
 async fn prueba_dependencia_duplicada_es_rechazada() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _guard = start_server().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
@@ -195,10 +215,13 @@ async fn prueba_dependencia_duplicada_es_rechazada() {
         resp2.status() == 409 || resp2.status() == 400,
         "La dependencia duplicada debería ser rechazada"
     );
+
+    cleanup_services(&client, base_url, &[&srv_a, &srv_b]).await;
 }
 
 #[tokio::test]
 async fn prueba_self_loop_es_rechazado() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _guard = start_server().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
@@ -218,4 +241,6 @@ async fn prueba_self_loop_es_rechazado() {
         resp.status() == 400 || resp.status() == 422,
         "Un self-loop debería ser rechazado por la API"
     );
+
+    cleanup_services(&client, base_url, &[&srv]).await;
 }
