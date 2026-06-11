@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 use crate::state::AppState;
 use crate::error::AppError;
 use crate::db;
+use mesh_core::models::{Service, Dependency};
 
 // ─── Helpers de serialización de fechas ──────────────────────────────────────
 
@@ -104,10 +105,10 @@ pub async fn registrar_servicio(
     State(state): State<AppState>,
     Json(payload): Json<NuevoServicio>,
 ) -> Result<(StatusCode, Json<ServicioDto>), AppError> {
-    let nombre = payload.nombre.trim().to_string();
-    if nombre.is_empty() {
-        return Err(AppError::bad_request("El nombre del servicio no puede estar vacío."));
-    }
+    let servicio_modelo = Service::new(uuid::Uuid::nil(), payload.nombre.clone())
+    .map_err(AppError::bad_request)?;
+
+let nombre = servicio_modelo.name;
 
     let db_svc = db::insertar_servicio(&state.db, &nombre, &payload.descripcion)
         .await?
@@ -224,14 +225,13 @@ pub async fn registrar_dependencia(
     State(state): State<AppState>,
     Json(payload): Json<NuevaDependencia>,
 ) -> Result<(StatusCode, Json<DependenciaDto>), AppError> {
-    if payload.origen.trim() == payload.destino.trim() {
-        return Err(AppError::bad_request("Un servicio no puede depender de sí mismo (self-loop)."));
-    }
+   let dependencia_modelo = Dependency::new(payload.origen.clone(), payload.destino.clone())
+    .map_err(AppError::bad_request)?;
 
-    let mut tx = state.db.begin().await.map_err(|e| AppError::internal(e.to_string()))?;
+let mut tx = state.db.begin().await.map_err(|e| AppError::internal(e.to_string()))?;
 
-    let origen = payload.origen.trim();
-    let destino = payload.destino.trim();
+let origen = dependencia_modelo.from_service.as_str();
+let destino = dependencia_modelo.to_service.as_str();
 
     let db_dep = db::insertar_dependencia(&mut tx, origen, destino, &payload.descripcion)
         .await?
