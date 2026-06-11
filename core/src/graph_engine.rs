@@ -86,6 +86,15 @@ impl GraphEngine {
         }
     }
 
+    /// Elimina una dependencia (arista dirigida) entre dos servicios, si existe.
+    pub fn remover_dependencia(&mut self, desde: &str, hacia: &str) {
+        if let (Some(&indice_desde), Some(&indice_hacia)) = (self.indices.get(desde), self.indices.get(hacia)) {
+            if let Some(arista) = self.grafo.find_edge(indice_desde, indice_hacia) {
+                self.grafo.remove_edge(arista);
+            }
+        }
+    }
+
     /// Determina si el grafo contiene al menos un ciclo.
     /// Usa el algoritmo is_cyclic_directed de petgraph.
     pub fn tiene_ciclo(&self) -> bool {

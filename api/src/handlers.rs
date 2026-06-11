@@ -222,9 +222,11 @@ pub async fn registrar_dependencia(
     }
 
     if let Err(e) = tx.commit().await {
-        // Rollback del grafo si la query falla al confirmar la transacción
+        // Rollback del grafo y motor si la query falla al confirmar la transacción
         let mut g = state.grafo.write().await;
         g.remover_dependencia(&db_dep.origen, &db_dep.destino);
+        let mut m = state.motor.write().await;
+        m.remover_dependencia(&db_dep.origen, &db_dep.destino);
         return Err(AppError::internal(e.to_string()));
     }
 
