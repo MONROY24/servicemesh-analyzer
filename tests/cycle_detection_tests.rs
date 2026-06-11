@@ -95,3 +95,116 @@ async fn prueba_flujo_completo_con_ciclo() {
     assert_eq!(body["tiene_ciclo"], true, "El GraphEngine debería haber detectado el ciclo que acabamos de introducir");
     assert!(body["alerta"].as_str().unwrap().contains("ALERTA CRÍTICA"), "El mensaje de alerta no indica ciclo");
 }
+#[tokio::test]
+async fn prueba_grafo_sin_ciclos() {
+    let _guard = start_server().await;
+    let client = Client::new();
+    let base_url = "http://127.0.0.1:3000";
+
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let srv_a = format!("sin_ciclo_a_{}", suffix);
+    let srv_b = format!("sin_ciclo_b_{}", suffix);
+    let srv_c = format!("sin_ciclo_c_{}", suffix);
+
+    for srv in [&srv_a, &srv_b, &srv_c] {
+        client.post(&format!("{}/services", base_url))
+            .json(&json!({ "nombre": srv }))
+            .send().await.unwrap();
+    }
+
+    // A -> B -> C (sin ciclo)
+    client.post(&format!("{}/deps", base_url))
+        .json(&json!({ "origen": &srv_a, "destino": &srv_b }))
+        .send().await.unwrap();
+
+    client.post(&format!("{}/deps", base_url))
+        .json(&json!({ "origen": &srv_b, "destino": &srv_c }))
+        .send().await.unwrap();
+
+    let resp = client.get(&format!("{}/analyze", base_url))
+        .send().await.unwrap();
+
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["tiene_ciclo"], false, "No debería detectar ciclo en topología válida");
+}
+
+#[tokio::test]
+async fn prueba_servicio_duplicado_es_rechazado() {
+    let _guard = start_server().await;
+    let client = Client::new();
+    let base_url = "http://127.0.0.1:3000";
+
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let srv = format!("duplicado_{}", suffix);
+
+    // Primer registro debe funcionar
+    let resp1 = client.post(&format!("{}/services", base_url))
+        .json(&json!({ "nombre": srv }))
+        .send().await.unwrap();
+    assert!(resp1.status().is_success(), "El primer registro debería ser exitoso");
+
+    // Segundo registro del mismo servicio debe ser rechazado
+    let resp2 = client.post(&format!("{}/services", base_url))
+        .json(&json!({ "nombre": srv }))
+        .send().await.unwrap();
+    assert!(
+        resp2.status() == 409 || resp2.status() == 400,
+        "El servicio duplicado debería ser rechazado con 409 o 400"
+    );
+}
+
+#[tokio::test]
+async fn prueba_dependencia_duplicada_es_rechazada() {
+    let _guard = start_server().await;
+    let client = Client::new();
+    let base_url = "http://127.0.0.1:3000";
+
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let srv_a = format!("dep_dup_a_{}", suffix);
+    let srv_b = format!("dep_dup_b_{}", suffix);
+
+    for srv in [&srv_a, &srv_b] {
+        client.post(&format!("{}/services", base_url))
+            .json(&json!({ "nombre": srv }))
+            .send().await.unwrap();
+    }
+
+    // Primera dependencia debe funcionar
+    let resp1 = client.post(&format!("{}/deps", base_url))
+        .json(&json!({ "origen": &srv_a, "destino": &srv_b }))
+        .send().await.unwrap();
+    assert!(resp1.status().is_success(), "La primera dependencia debería crearse");
+
+    // Segunda dependencia igual debe ser rechazada
+    let resp2 = client.post(&format!("{}/deps", base_url))
+        .json(&json!({ "origen": &srv_a, "destino": &srv_b }))
+        .send().await.unwrap();
+    assert!(
+        resp2.status() == 409 || resp2.status() == 400,
+        "La dependencia duplicada debería ser rechazada"
+    );
+}
+
+#[tokio::test]
+async fn prueba_self_loop_es_rechazado() {
+    let _guard = start_server().await;
+    let client = Client::new();
+    let base_url = "http://127.0.0.1:3000";
+
+    let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let srv = format!("self_loop_{}", suffix);
+
+    client.post(&format!("{}/services", base_url))
+        .json(&json!({ "nombre": srv }))
+        .send().await.unwrap();
+
+    // Un servicio que depende de sí mismo debe ser rechazado
+    let resp = client.post(&format!("{}/deps", base_url))
+        .json(&json!({ "origen": &srv, "destino": &srv }))
+        .send().await.unwrap();
+
+    assert!(
+        resp.status() == 400 || resp.status() == 422,
+        "Un self-loop debería ser rechazado por la API"
+    );
+}
