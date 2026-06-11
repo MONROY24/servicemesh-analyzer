@@ -17,6 +17,7 @@ pub fn crear_router(state: AppState) -> Router {
         // Dependencias
         .route("/deps",          post(handlers::registrar_dependencia)
                                 .get(handlers::listar_dependencias))
+        .route("/deps/:origen/:destino", delete(handlers::eliminar_dependencia))
         // Análisis
         .route("/analyze",         get(handlers::analizar_grafo))
         .route("/analyze/history", get(handlers::historial_analisis))

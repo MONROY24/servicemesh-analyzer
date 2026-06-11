@@ -201,6 +201,20 @@ pub async fn insertar_dependencia(
     }
 }
 
+pub async fn eliminar_dependencia(
+    db: &PgPool,
+    origen: &str,
+    destino: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM dependencias WHERE origen = $1 AND destino = $2")
+        .bind(origen)
+        .bind(destino)
+        .execute(db)
+        .await?;
+    
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn listar_dependencias_vista(db: &PgPool) -> Result<Vec<DbVistaGrafo>, sqlx::Error> {
     let filas = sqlx::query(
         "SELECT dep_id, origen, desc_origen, destino, desc_destino, desc_dependencia, creado_en
