@@ -103,6 +103,15 @@ pub async fn insertar_servicio(
     }
 }
 
+pub async fn desactivar_servicio(db: &PgPool, nombre: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE servicios SET activo = FALSE WHERE nombre = $1 AND activo = TRUE")
+        .bind(nombre)
+        .execute(db)
+        .await?;
+    
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn listar_servicios_activos(db: &PgPool) -> Result<Vec<DbServicio>, sqlx::Error> {
     let filas = sqlx::query(
         "SELECT id, nombre, descripcion, activo, creado_en, actualizado_en

@@ -136,6 +136,34 @@ pub async fn registrar_servicio(
     ))
 }
 
+// ─── DELETE /services/:nombre ─────────────────────────────────────────────────
+pub async fn desactivar_servicio(
+    State(state): State<AppState>,
+    axum::extract::Path(nombre): axum::extract::Path<String>,
+) -> Result<StatusCode, AppError> {
+    let nombre = nombre.trim();
+    if nombre.is_empty() {
+        return Err(AppError::bad_request("El nombre del servicio no puede estar vacío."));
+    }
+
+    let desactivado = db::desactivar_servicio(&state.db, nombre).await?;
+    if !desactivado {
+        return Err(AppError::not_found("Servicio no encontrado o ya estaba desactivado."));
+    }
+
+    // Actualizar grafos en memoria
+    {
+        let mut g = state.grafo.write().await;
+        g.remover_servicio(nombre);
+        let mut m = state.motor.write().await;
+        m.remover_servicio(nombre);
+    }
+
+    tracing::info!("Servicio desactivado: {}", nombre);
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── GET /services ────────────────────────────────────────────────────────────
 /// Lista todos los servicios activos.
 pub async fn listar_servicios(

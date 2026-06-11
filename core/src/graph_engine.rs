@@ -72,6 +72,19 @@ impl GraphEngine {
         }
     }
 
+    /// Remueve un servicio del grafo por completo, eliminando nodos y aristas incidentes.
+    pub fn remover_servicio(&mut self, nombre: &str) {
+        if let Some(indice) = self.indices.remove(nombre) {
+            self.grafo.remove_node(indice);
+            // Al remover un nodo, petgraph intercambia el nodo removido con el último nodo del grafo.
+            // Necesitamos actualizar el índice del nodo que fue movido.
+            if indice.index() < self.grafo.node_count() {
+                let nombre_movido = self.grafo[indice].clone();
+                self.indices.insert(nombre_movido, indice);
+            }
+        }
+    }
+
     /// Agrega una dependencia (arista dirigida) entre dos servicios.
     /// Primero asegura que ambos servicios existan como nodos en el grafo.
     /// Luego agrega la arista solo si aún no existe entre los dos nodos.
