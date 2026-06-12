@@ -8,28 +8,13 @@ use std::sync::Mutex;
 // Mutex global para serializar los tests de integración y evitar colisiones de puerto 3000 y base de datos
 static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
-struct ServerGuard {
-    child: Child,
-}
-
-impl Drop for ServerGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-async fn start_server() -> ServerGuard {
-    let child = Command::new("cargo")
-        .arg("run")
-        .arg("-p")
-        .arg("api")
-        .spawn()
-        .expect("No se pudo iniciar el servidor API para las pruebas");
-
+async fn verify_server_is_up() {
+    // Para la presentación/defensa, es más robusto levantar el servidor manualmente
+    // en lugar de usar `cargo run -p api` y esperar.
+    // Aquí solo verificamos que el servidor responda.
     let client = Client::new();
     let mut up = false;
-    for _ in 0..60 {
+    for _ in 0..10 {
         if client.get("http://127.0.0.1:3000/services").send().await.is_ok() {
             up = true;
             break;
@@ -38,10 +23,8 @@ async fn start_server() -> ServerGuard {
     }
 
     if !up {
-        panic!("El servidor API no estuvo listo a tiempo o falló al iniciar.");
+        panic!("El servidor API no está en ejecución. Por favor, levante el servidor manualmente (cargo run -p api) antes de correr los tests.");
     }
-
-    ServerGuard { child }
 }
 
 async fn cleanup_services(client: &Client, base_url: &str, services: &[&str]) {
@@ -53,7 +36,7 @@ async fn cleanup_services(client: &Client, base_url: &str, services: &[&str]) {
 #[tokio::test]
 async fn prueba_flujo_completo_con_ciclo() {
     let _lock = TEST_MUTEX.lock().unwrap();
-    let _guard = start_server().await;
+    verify_server_is_up().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
 
@@ -96,7 +79,7 @@ async fn prueba_flujo_completo_con_ciclo() {
 #[tokio::test]
 async fn prueba_grafo_sin_ciclos() {
     let _lock = TEST_MUTEX.lock().unwrap();
-    let _guard = start_server().await;
+    verify_server_is_up().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
 
@@ -153,7 +136,7 @@ async fn prueba_grafo_sin_ciclos() {
 #[tokio::test]
 async fn prueba_servicio_duplicado_es_rechazado() {
     let _lock = TEST_MUTEX.lock().unwrap();
-    let _guard = start_server().await;
+    verify_server_is_up().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
 
@@ -179,7 +162,7 @@ async fn prueba_servicio_duplicado_es_rechazado() {
 #[tokio::test]
 async fn prueba_dependencia_duplicada_es_rechazada() {
     let _lock = TEST_MUTEX.lock().unwrap();
-    let _guard = start_server().await;
+    verify_server_is_up().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
 
@@ -222,7 +205,7 @@ async fn prueba_dependencia_duplicada_es_rechazada() {
 #[tokio::test]
 async fn prueba_self_loop_es_rechazado() {
     let _lock = TEST_MUTEX.lock().unwrap();
-    let _guard = start_server().await;
+    verify_server_is_up().await;
     let client = Client::new();
     let base_url = "http://127.0.0.1:3000";
 

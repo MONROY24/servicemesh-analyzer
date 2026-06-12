@@ -259,6 +259,8 @@ pub async fn insertar_analisis(
 }
 
 pub async fn listar_historial_analisis(db: &PgPool) -> Result<Vec<DbAnalisisResumen>, sqlx::Error> {
+    // TODO: Considerar implementar paginación (LIMIT/OFFSET) para producción o
+    // si el historial crece significativamente. Por ahora LIMIT 50 es suficiente para la demo.
     let filas = sqlx::query(
         "SELECT id, tiene_ciclo, ejecutado_en
          FROM analisis

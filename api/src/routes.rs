@@ -11,9 +11,9 @@ pub fn crear_router(state: AppState) -> Router {
         // Servicios
         .route("/services",      post(handlers::registrar_servicio)
                                 .get(handlers::listar_servicios))
-        .route("/services/{nombre}", delete(handlers::desactivar_servicio))
         .route("/services/raiz", get(handlers::servicios_raiz))
         .route("/services/hoja", get(handlers::servicios_hoja))
+        .route("/services/{nombre}", delete(handlers::desactivar_servicio))
         // Dependencias
         .route("/deps",          post(handlers::registrar_dependencia)
                                 .get(handlers::listar_dependencias))
