@@ -101,18 +101,37 @@ pub struct AnalisisResumen {
 
 // ─── POST /services ───────────────────────────────────────────────────────────
 /// Registra un nuevo microservicio en la BD y en el grafo en memoria.
+/// Si el nombre ya existe, agrega un sufijo numérico (_1, _2, …) hasta encontrar uno disponible.
 pub async fn registrar_servicio(
     State(state): State<AppState>,
     Json(payload): Json<NuevoServicio>,
 ) -> Result<(StatusCode, Json<ServicioDto>), AppError> {
     let servicio_modelo = Service::new(uuid::Uuid::nil(), payload.nombre.clone())
-    .map_err(AppError::bad_request)?;
+        .map_err(AppError::bad_request)?;
 
-let nombre = servicio_modelo.name;
+    let nombre_base = servicio_modelo.name;
 
-    let db_svc = db::insertar_servicio(&state.db, &nombre, &payload.descripcion)
-        .await?
-        .ok_or_else(|| AppError::conflict("Ya existe un servicio con ese nombre."))?;
+    // Intentar insertar con el nombre original primero
+    let mut nombre_final = nombre_base.clone();
+    let mut db_svc = db::insertar_servicio(&state.db, &nombre_final, &payload.descripcion).await?;
+
+    // Si ya existe, probar con sufijos _1, _2, _3, …
+    if db_svc.is_none() {
+        let mut sufijo = 1u32;
+        loop {
+            nombre_final = format!("{}_{}", nombre_base, sufijo);
+            db_svc = db::insertar_servicio(&state.db, &nombre_final, &payload.descripcion).await?;
+            if db_svc.is_some() {
+                break;
+            }
+            sufijo += 1;
+            if sufijo > 1000 {
+                return Err(AppError::internal("No se pudo generar un nombre único después de 1000 intentos.".to_string()));
+            }
+        }
+    }
+
+    let db_svc = db_svc.unwrap();
 
     // Actualizar motor en memoria
     {
@@ -221,21 +240,41 @@ pub async fn servicios_hoja(
 
 // ─── POST /deps ───────────────────────────────────────────────────────────────
 /// Registra una dependencia dirigida entre dos microservicios.
+/// Si la dependencia ya existe, agrega un sufijo numérico al destino (_1, _2, …)
+/// para crear una variante única.
 pub async fn registrar_dependencia(
     State(state): State<AppState>,
     Json(payload): Json<NuevaDependencia>,
 ) -> Result<(StatusCode, Json<DependenciaDto>), AppError> {
-   let dependencia_modelo = Dependency::new(payload.origen.clone(), payload.destino.clone())
-    .map_err(AppError::bad_request)?;
+    let dependencia_modelo = Dependency::new(payload.origen.clone(), payload.destino.clone())
+        .map_err(AppError::bad_request)?;
 
-let mut tx = state.db.begin().await.map_err(|e| AppError::internal(e.to_string()))?;
+    let mut tx = state.db.begin().await.map_err(|e| AppError::internal(e.to_string()))?;
 
-let origen = dependencia_modelo.from_service.as_str();
-let destino = dependencia_modelo.to_service.as_str();
+    let origen = dependencia_modelo.from_service.as_str();
+    let destino_base = dependencia_modelo.to_service.clone();
 
-    let db_dep = db::insertar_dependencia(&mut tx, origen, destino, &payload.descripcion)
-        .await?
-        .ok_or_else(|| AppError::conflict("Ya existe esa dependencia."))?;
+    // Intentar insertar con el destino original primero
+    let mut destino_final = destino_base.clone();
+    let mut db_dep = db::insertar_dependencia(&mut tx, origen, &destino_final, &payload.descripcion).await?;
+
+    // Si ya existe, probar con sufijos _1, _2, _3, …
+    if db_dep.is_none() {
+        let mut sufijo = 1u32;
+        loop {
+            destino_final = format!("{}_{}", destino_base, sufijo);
+            db_dep = db::insertar_dependencia(&mut tx, origen, &destino_final, &payload.descripcion).await?;
+            if db_dep.is_some() {
+                break;
+            }
+            sufijo += 1;
+            if sufijo > 1000 {
+                return Err(AppError::internal("No se pudo generar una dependencia única después de 1000 intentos.".to_string()));
+            }
+        }
+    }
+
+    let db_dep = db_dep.unwrap();
 
     // Actualizar motor en memoria
     {
